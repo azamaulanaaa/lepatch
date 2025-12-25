@@ -5,3 +5,4 @@ edition = "2024"
 license-file = "LICENSE"
 
 [dependencies]
+fs2 = "0.4.3"
