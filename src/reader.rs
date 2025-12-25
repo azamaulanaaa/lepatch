@@ -89,27 +89,29 @@ impl Read for SliceReader {
     }
 }
 
-pub struct ChunkReader {
-    slices: VecDeque<SliceReader>,
+pub struct ChainReader<R: Read> {
+    inners: VecDeque<R>,
 }
 
-impl ChunkReader {
-    pub fn new(slices: VecDeque<SliceReader>) -> Self {
-        Self { slices }
+impl<R: Read> ChainReader<R> {
+    pub fn new<I: Into<VecDeque<R>>>(inners: I) -> Self {
+        Self {
+            inners: inners.into(),
+        }
     }
 }
 
-impl Read for ChunkReader {
+impl<R: Read> Read for ChainReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         loop {
-            let current_slice = match self.slices.front_mut() {
+            let current_reader = match self.inners.front_mut() {
                 Some(slice) => slice,
                 None => return Ok(0),
             };
 
-            match current_slice.read(buf) {
+            match current_reader.read(buf) {
                 Ok(0) => {
-                    self.slices.pop_front();
+                    self.inners.pop_front();
                     continue;
                 }
                 Ok(n) => {
@@ -130,7 +132,7 @@ pub struct ChunkMapping {
 
 pub struct Chunk {
     pub metadata: Vec<ChunkMapping>,
-    pub reader: ChunkReader,
+    pub reader: ChainReader<SliceReader>,
 }
 
 pub struct Chunker {
@@ -211,7 +213,7 @@ impl Iterator for Chunker {
         if slices.is_empty() {
             None
         } else {
-            let reader = ChunkReader::new(slices);
+            let reader = ChainReader::new(slices);
 
             Some(Ok(Chunk {
                 metadata: mappings,
