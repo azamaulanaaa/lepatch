@@ -14,13 +14,21 @@ use fs2::FileExt;
 
 pub struct FileLock {
     inner: File,
+    pub path: PathBuf,
 }
 
 impl FileLock {
-    pub fn new(file: File) -> io::Result<Self> {
+    pub fn new<P: Into<PathBuf>>(path: P) -> io::Result<Self> {
+        let path_buf = path.into();
+
+        let file = File::open(&path_buf)?;
+
         FileExt::lock_shared(&file)?;
 
-        Ok(Self { inner: file })
+        Ok(Self {
+            inner: file,
+            path: path_buf,
+        })
     }
 }
 
@@ -113,6 +121,18 @@ impl Read for ChunkReader {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ChunkMapping {
+    pub path: PathBuf,
+    pub offset: u64,
+    pub length: u64,
+}
+
+pub struct Chunk {
+    pub metadata: Vec<ChunkMapping>,
+    pub reader: ChunkReader,
+}
+
 pub struct Chunker {
     pending_paths: VecDeque<PathBuf>,
     current_file: Option<Arc<FileLock>>,
@@ -136,26 +156,21 @@ impl Chunker {
 }
 
 impl Iterator for Chunker {
-    type Item = io::Result<ChunkReader>;
+    type Item = io::Result<Chunk>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut slices = VecDeque::new();
+        let mut mappings = Vec::new();
         let mut bytes_needed = self.chunk_size;
 
         while bytes_needed > 0 {
             if self.current_file.is_none() {
                 match self.pending_paths.pop_front() {
                     Some(path) => {
-                        let file = match File::open(&path) {
-                            Ok(f) => f,
-                            Err(e) => return Some(Err(e)),
-                        };
-
-                        let locked = match FileLock::new(file) {
+                        let locked = match FileLock::new(path) {
                             Ok(l) => Arc::new(l),
                             Err(e) => return Some(Err(e)),
                         };
-
                         self.current_file = Some(locked);
                     }
                     None => break,
@@ -178,6 +193,12 @@ impl Iterator for Chunker {
             let available = file_len - self.offset;
             let to_read = std::cmp::min(available, bytes_needed);
 
+            mappings.push(ChunkMapping {
+                path: current_lock.path.clone(),
+                offset: self.offset,
+                length: to_read,
+            });
+
             match SliceReader::new(Arc::clone(current_lock), self.offset, to_read) {
                 Ok(slice) => slices.push_back(slice),
                 Err(e) => return Some(Err(e)),
@@ -190,7 +211,12 @@ impl Iterator for Chunker {
         if slices.is_empty() {
             None
         } else {
-            Some(Ok(ChunkReader::new(slices)))
+            let reader = ChunkReader::new(slices);
+
+            Some(Ok(Chunk {
+                metadata: mappings,
+                reader,
+            }))
         }
     }
 }
