@@ -53,11 +53,11 @@ pub struct SliceReader {
 }
 
 impl SliceReader {
-    pub fn new(file: Arc<FileLock>, offset: u64, limit: u64) -> io::Result<Self> {
+    pub fn new(file: Arc<FileLock>, offset: u64, length: u64) -> io::Result<Self> {
         Ok(Self {
             file,
             offset,
-            remaining: limit,
+            remaining: length,
         })
     }
 }
