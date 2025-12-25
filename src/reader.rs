@@ -135,6 +135,75 @@ pub struct Chunk {
     pub reader: ChainReader<SliceReader>,
 }
 
+struct EntryFileRegistry {
+    path: PathBuf,
+    length: u64,
+    global_offset: u64,
+}
+
+pub struct FileRegistry {
+    entries: Vec<EntryFileRegistry>,
+}
+
+impl FileRegistry {
+    pub fn new<P: Into<PathBuf>, I: Iterator<Item = P>>(paths: I) -> io::Result<Self> {
+        let mut global_offset = 0;
+
+        let entries = paths
+            .map(|path| {
+                let path_buf = path.into();
+                let length = std::fs::metadata(&path_buf)?.len();
+
+                let entry = EntryFileRegistry {
+                    path: path_buf,
+                    length,
+                    global_offset,
+                };
+
+                global_offset += length;
+
+                Ok(entry)
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+
+        Ok(Self { entries })
+    }
+
+    pub fn resolve_chunk(&self, global_start: u64, length: u64) -> Vec<ChunkMapping> {
+        let global_end = global_start + length;
+        let mut mappings = Vec::new();
+
+        let start_index = self
+            .entries
+            .partition_point(|entry| (entry.global_offset + entry.length) <= global_start);
+
+        for entry in self.entries.iter().skip(start_index) {
+            if entry.global_offset >= global_end {
+                break;
+            }
+
+            let file_end_global = entry.global_offset + entry.length;
+
+            let overlap_start_global = std::cmp::max(global_start, entry.global_offset);
+            let overlap_end_global = std::cmp::min(global_end, file_end_global);
+
+            let overlap_len = overlap_end_global.saturating_sub(overlap_start_global);
+
+            if overlap_len > 0 {
+                let file_local_offset = overlap_start_global - entry.global_offset;
+
+                mappings.push(ChunkMapping {
+                    path: entry.path.clone(),
+                    offset: file_local_offset,
+                    length: overlap_len,
+                });
+            }
+        }
+
+        mappings
+    }
+}
+
 pub struct Chunker {
     pending_paths: VecDeque<PathBuf>,
     current_file: Option<Arc<FileLock>>,
