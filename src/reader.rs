@@ -5,7 +5,7 @@ use std::{
     collections::VecDeque,
     fs::File,
     io::{self, Read},
-    ops::Deref,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -43,6 +43,12 @@ impl Deref for FileLock {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl DerefMut for FileLock {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
