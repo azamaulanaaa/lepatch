@@ -2,6 +2,7 @@
 use std::os::windows::fs::FileExt as WinFileExt;
 
 use std::{
+    collections::VecDeque,
     fs::File,
     io::{self, Read},
     ops::Deref,
@@ -76,5 +77,37 @@ impl Read for SliceReader {
         self.remaining -= n as u64;
 
         Ok(n)
+    }
+}
+
+pub struct ChunkReader {
+    slices: VecDeque<SliceReader>,
+}
+
+impl ChunkReader {
+    pub fn new(slices: VecDeque<SliceReader>) -> Self {
+        Self { slices }
+    }
+}
+
+impl Read for ChunkReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let current_slice = match self.slices.front_mut() {
+                Some(slice) => slice,
+                None => return Ok(0),
+            };
+
+            match current_slice.read(buf) {
+                Ok(0) => {
+                    self.slices.pop_front();
+                    continue;
+                }
+                Ok(n) => {
+                    return Ok(n);
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 }
