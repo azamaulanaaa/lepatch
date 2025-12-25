@@ -210,6 +210,47 @@ impl FileRegistry {
     }
 }
 
+pub struct GlobalStream {
+    paths: VecDeque<PathBuf>,
+    current_file: Option<FileLock>,
+}
+
+impl GlobalStream {
+    pub fn new<P: Into<PathBuf>, I: Iterator<Item = P>>(paths: I) -> Self {
+        let paths = paths.map(|v| v.into()).collect();
+
+        Self {
+            paths,
+            current_file: None,
+        }
+    }
+}
+
+impl Read for GlobalStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            if let Some(ref mut file) = self.current_file {
+                match file.read(buf) {
+                    Ok(0) => {
+                        self.current_file = None;
+                        continue;
+                    }
+                    Ok(n) => return Ok(n),
+                    Err(e) => return Err(e),
+                }
+            }
+
+            match self.paths.pop_front() {
+                Some(path) => {
+                    let lock = FileLock::new(path)?;
+                    self.current_file = Some(lock);
+                }
+                None => return Ok(0),
+            }
+        }
+    }
+}
+
 pub struct Chunker {
     pending_paths: VecDeque<PathBuf>,
     current_file: Option<Arc<FileLock>>,
