@@ -6,10 +6,11 @@ use std::{
     fs::File,
     io::{self, Read},
     ops::{Deref, DerefMut},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
 };
 
+use fastcdc::v2020::StreamCDC;
 use fs2::FileExt;
 
 pub struct FileLock {
@@ -251,25 +252,28 @@ impl Read for GlobalStream {
     }
 }
 
+pub struct ChunkerConfig {
+    pub min_size: u32,
+    pub avg_size: u32,
+    pub max_size: u32,
+}
+
 pub struct Chunker {
-    pending_paths: VecDeque<PathBuf>,
-    current_file: Option<Arc<FileLock>>,
-    offset: u64,
-    chunk_size: u64,
+    registry: Arc<FileRegistry>,
+    cdc_iter: StreamCDC<GlobalStream>,
 }
 
 impl Chunker {
-    pub fn new<P: AsRef<Path>, I: Iterator<Item = P>>(paths: I, chunk_size: u64) -> Self {
-        let pending_paths = paths
-            .map(|p| p.as_ref().to_path_buf())
-            .collect::<VecDeque<_>>();
+    pub fn new(paths: Vec<PathBuf>, config: ChunkerConfig) -> io::Result<Self> {
+        let registry = Arc::new(FileRegistry::new(paths.iter())?);
 
-        Self {
-            pending_paths,
-            current_file: None,
-            offset: 0,
-            chunk_size,
-        }
+        let stream = GlobalStream::new(paths.iter());
+        let cdc = StreamCDC::new(stream, config.min_size, config.avg_size, config.max_size);
+
+        Ok(Self {
+            registry,
+            cdc_iter: cdc,
+        })
     }
 }
 
@@ -277,64 +281,33 @@ impl Iterator for Chunker {
     type Item = io::Result<Chunk>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        let cdc_chunk = self.cdc_iter.next()?;
+        let cdc_chunk = match cdc_chunk {
+            Ok(v) => v,
+            Err(e) => return Some(Err(io::Error::other(e))),
+        };
+
+        let mappings = self
+            .registry
+            .resolve_chunk(cdc_chunk.offset as u64, cdc_chunk.length as u64);
+
         let mut slices = VecDeque::new();
-        let mut mappings = Vec::new();
-        let mut bytes_needed = self.chunk_size;
 
-        while bytes_needed > 0 {
-            if self.current_file.is_none() {
-                match self.pending_paths.pop_front() {
-                    Some(path) => {
-                        let locked = match FileLock::new(path) {
-                            Ok(l) => Arc::new(l),
-                            Err(e) => return Some(Err(e)),
-                        };
-                        self.current_file = Some(locked);
-                    }
-                    None => break,
-                }
-            }
-
-            let current_lock = self.current_file.as_ref().unwrap();
-
-            let file_len = match current_lock.inner.metadata() {
-                Ok(m) => m.len(),
+        for map in &mappings {
+            let lock = match FileLock::new(&map.path) {
+                Ok(l) => Arc::new(l),
                 Err(e) => return Some(Err(e)),
             };
 
-            if self.offset >= file_len {
-                self.current_file = None;
-                self.offset = 0;
-                continue;
-            }
-
-            let available = file_len - self.offset;
-            let to_read = std::cmp::min(available, bytes_needed);
-
-            mappings.push(ChunkMapping {
-                path: current_lock.path.clone(),
-                offset: self.offset,
-                length: to_read,
-            });
-
-            match SliceReader::new(Arc::clone(current_lock), self.offset, to_read) {
+            match SliceReader::new(lock, map.offset, map.length) {
                 Ok(slice) => slices.push_back(slice),
                 Err(e) => return Some(Err(e)),
             }
-
-            self.offset += to_read;
-            bytes_needed -= to_read;
         }
 
-        if slices.is_empty() {
-            None
-        } else {
-            let reader = ChainReader::new(slices);
-
-            Some(Ok(Chunk {
-                metadata: mappings,
-                reader,
-            }))
-        }
+        Some(Ok(Chunk {
+            metadata: mappings,
+            reader: ChainReader::new(slices),
+        }))
     }
 }
