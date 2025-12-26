@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    io::{self, Read, Write},
+    path::PathBuf,
+};
 
 pub struct Snapshot {
     pub name: String,
@@ -30,4 +33,9 @@ pub struct FileChunk {
     pub chunk_offset: u32,
     pub file_offset: u64,
     pub length: u32,
+}
+
+pub trait MetadataStore {
+    fn open<R: Read>(&self, reader: R) -> io::Result<Snapshot>;
+    fn save<W: Write>(&self, snapshot: &Snapshot, writer: W) -> io::Result<()>;
 }
