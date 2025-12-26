@@ -7,3 +7,4 @@ license-file = "LICENSE"
 [dependencies]
 fastcdc = "3.2.1"
 fs2 = "0.4.3"
+serde = { version = "1.0.228", features = ["derive"] }
