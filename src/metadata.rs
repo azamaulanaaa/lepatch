@@ -17,7 +17,7 @@ pub struct Snapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chunk {
-    pub hash: Vec<u8>,
+    pub hash: [u8; 32],
     pub location: String,
 }
 
