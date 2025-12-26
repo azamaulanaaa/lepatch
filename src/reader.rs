@@ -131,14 +131,14 @@ impl<R: Read> Read for ChainReader<R> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ChunkMapping {
+pub struct ChunkSource {
     pub path: PathBuf,
     pub offset: u64,
     pub length: u64,
 }
 
 pub struct Chunk {
-    pub metadata: Vec<ChunkMapping>,
+    pub sources: Vec<ChunkSource>,
     pub reader: ChainReader<SliceReader>,
 }
 
@@ -176,7 +176,7 @@ impl FileRegistry {
         Ok(Self { entries })
     }
 
-    pub fn resolve_chunk(&self, global_start: u64, length: u64) -> Vec<ChunkMapping> {
+    pub fn resolve_chunk(&self, global_start: u64, length: u64) -> Vec<ChunkSource> {
         let global_end = global_start + length;
         let mut mappings = Vec::new();
 
@@ -199,7 +199,7 @@ impl FileRegistry {
             if overlap_len > 0 {
                 let file_local_offset = overlap_start_global - entry.global_offset;
 
-                mappings.push(ChunkMapping {
+                mappings.push(ChunkSource {
                     path: entry.path.clone(),
                     offset: file_local_offset,
                     length: overlap_len,
@@ -287,13 +287,13 @@ impl Iterator for Chunker {
             Err(e) => return Some(Err(io::Error::other(e))),
         };
 
-        let mappings = self
+        let sources = self
             .registry
             .resolve_chunk(cdc_chunk.offset as u64, cdc_chunk.length as u64);
 
         let mut slices = VecDeque::new();
 
-        for map in &mappings {
+        for map in &sources {
             let lock = match FileLock::new(&map.path) {
                 Ok(l) => Arc::new(l),
                 Err(e) => return Some(Err(e)),
@@ -306,7 +306,7 @@ impl Iterator for Chunker {
         }
 
         Some(Ok(Chunk {
-            metadata: mappings,
+            sources,
             reader: ChainReader::new(slices),
         }))
     }
