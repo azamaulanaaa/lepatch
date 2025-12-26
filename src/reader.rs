@@ -134,7 +134,7 @@ impl<R: Read> Read for ChainReader<R> {
 pub struct ChunkSource {
     pub path: PathBuf,
     pub offset: u64,
-    pub length: u64,
+    pub length: u32,
 }
 
 pub struct Chunk {
@@ -176,8 +176,8 @@ impl FileRegistry {
         Ok(Self { entries })
     }
 
-    pub fn resolve_chunk(&self, global_start: u64, length: u64) -> Vec<ChunkSource> {
-        let global_end = global_start + length;
+    pub fn resolve_chunk(&self, global_start: u64, length: u32) -> Vec<ChunkSource> {
+        let global_end = global_start + length as u64;
         let mut mappings = Vec::new();
 
         let start_index = self
@@ -194,7 +194,7 @@ impl FileRegistry {
             let overlap_start_global = std::cmp::max(global_start, entry.global_offset);
             let overlap_end_global = std::cmp::min(global_end, file_end_global);
 
-            let overlap_len = overlap_end_global.saturating_sub(overlap_start_global);
+            let overlap_len = overlap_end_global.saturating_sub(overlap_start_global) as u32;
 
             if overlap_len > 0 {
                 let file_local_offset = overlap_start_global - entry.global_offset;
@@ -289,7 +289,7 @@ impl Iterator for Chunker {
 
         let sources = self
             .registry
-            .resolve_chunk(cdc_chunk.offset as u64, cdc_chunk.length as u64);
+            .resolve_chunk(cdc_chunk.offset as u64, cdc_chunk.length as u32);
 
         let mut slices = VecDeque::new();
 
@@ -299,7 +299,7 @@ impl Iterator for Chunker {
                 Err(e) => return Some(Err(e)),
             };
 
-            match SliceReader::new(lock, map.offset, map.length) {
+            match SliceReader::new(lock, map.offset, map.length as u64) {
                 Ok(slice) => slices.push_back(slice),
                 Err(e) => return Some(Err(e)),
             }
