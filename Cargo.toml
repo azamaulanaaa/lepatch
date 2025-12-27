@@ -11,3 +11,4 @@ fastcdc = "3.2.1"
 fs2 = "0.4.3"
 futures = "0.3.31"
 serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.48.0", features = ["fs", "io-util", "sync"] }
