@@ -6,67 +6,22 @@ use std::{
     fmt::Debug,
     fs::File,
     io::{self, Read},
-    ops::{Deref, DerefMut},
     path::PathBuf,
     sync::Arc,
 };
 
 use fastcdc::v2020::StreamCDC;
-use fs2::FileExt;
 use tracing::instrument;
 
-#[derive(Debug)]
-pub struct FileLock {
-    inner: File,
-}
-
-impl FileLock {
-    #[instrument(level = "trace", err)]
-    pub fn new(file: File) -> io::Result<Self> {
-        FileExt::lock_shared(&file)?;
-
-        Ok(Self { inner: file })
-    }
-
-    #[instrument(level = "trace", err)]
-    pub fn from_path<P: Into<PathBuf> + Debug>(path: P) -> io::Result<Self> {
-        let path_buf = path.into();
-
-        let file = File::open(&path_buf)?;
-
-        Self::new(file)
-    }
-}
-
-impl Drop for FileLock {
-    fn drop(&mut self) {
-        let _ = self.inner.unlock();
-    }
-}
-
-impl Deref for FileLock {
-    type Target = File;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for FileLock {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
 pub struct SliceReader {
-    file: Arc<FileLock>,
+    file: Arc<File>,
     offset: u64,
     remaining: u64,
 }
 
 impl SliceReader {
     #[instrument(level = "trace", err)]
-    pub fn new(file: Arc<FileLock>, offset: u64, length: u64) -> io::Result<Self> {
+    pub fn new(file: Arc<File>, offset: u64, length: u64) -> io::Result<Self> {
         Ok(Self {
             file,
             offset,
@@ -224,7 +179,7 @@ impl FileRegistry {
 
 pub struct GlobalStream {
     paths: VecDeque<PathBuf>,
-    current_file: Option<FileLock>,
+    current_file: Option<File>,
 }
 
 impl GlobalStream {
@@ -256,8 +211,8 @@ impl Read for GlobalStream {
 
             match self.paths.pop_front() {
                 Some(path) => {
-                    let lock = FileLock::from_path(path)?;
-                    self.current_file = Some(lock);
+                    let file = File::open(path)?;
+                    self.current_file = Some(file);
                 }
                 None => return Ok(0),
             }
@@ -309,12 +264,12 @@ impl Iterator for Chunker {
         let mut slices = VecDeque::new();
 
         for map in &sources {
-            let lock = match FileLock::from_path(&map.path) {
+            let file = match File::open(&map.path) {
                 Ok(l) => Arc::new(l),
                 Err(e) => return Some(Err(e)),
             };
 
-            match SliceReader::new(lock, map.offset, map.length as u64) {
+            match SliceReader::new(file, map.offset, map.length as u64) {
                 Ok(slice) => slices.push_back(slice),
                 Err(e) => return Some(Err(e)),
             }
