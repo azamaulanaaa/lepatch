@@ -1,12 +1,18 @@
-use std::io::{self, SeekFrom};
-use std::path::PathBuf;
+use std::{
+    fmt::Debug,
+    io::{self, SeekFrom},
+    path::PathBuf,
+};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::fs::{self, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio::sync::RwLock;
+use tokio::{
+    fs,
+    io::{AsyncReadExt, AsyncSeekExt},
+    sync::RwLock,
+};
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
+use tracing::instrument;
 
 use super::{Storage, StreamReader};
 
@@ -16,13 +22,15 @@ struct BlobEntry {
     length: u64,
 }
 
+#[derive(Debug)]
 pub struct BlobFileStorage {
     file_path: PathBuf,
     lock: RwLock<()>,
 }
 
 impl BlobFileStorage {
-    pub async fn new<P: Into<PathBuf>>(path: P, allow_overwrite: bool) -> io::Result<Self> {
+    #[instrument(err)]
+    pub async fn new<P: Into<PathBuf> + Debug>(path: P, allow_overwrite: bool) -> io::Result<Self> {
         let file_path = path.into();
 
         if let Some(parent) = file_path.parent() {
@@ -32,7 +40,7 @@ impl BlobFileStorage {
         if allow_overwrite {
             fs::File::create(&file_path).await?;
         } else {
-            OpenOptions::new()
+            fs::OpenOptions::new()
                 .write(true)
                 .create(true)
                 .open(&file_path)
@@ -48,6 +56,7 @@ impl BlobFileStorage {
 
 #[async_trait]
 impl Storage for BlobFileStorage {
+    #[instrument(err)]
     async fn get(&self, key: &str) -> io::Result<StreamReader> {
         let entry: BlobEntry = serde_json::from_str(key).map_err(|e| {
             io::Error::new(
@@ -66,10 +75,11 @@ impl Storage for BlobFileStorage {
         Ok(Box::new(limited_reader.compat()))
     }
 
+    #[instrument(skip(reader), ret, err)]
     async fn put(&self, reader: StreamReader, _len: u64) -> io::Result<String> {
         let _guard = self.lock.write().await;
 
-        let mut file = OpenOptions::new()
+        let mut file = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.file_path)

@@ -3,6 +3,7 @@ use std::os::windows::fs::FileExt as WinFileExt;
 
 use std::{
     collections::VecDeque,
+    fmt::Debug,
     fs::File,
     io::{self, Read},
     ops::{Deref, DerefMut},
@@ -12,19 +13,23 @@ use std::{
 
 use fastcdc::v2020::StreamCDC;
 use fs2::FileExt;
+use tracing::instrument;
 
+#[derive(Debug)]
 pub struct FileLock {
     inner: File,
 }
 
 impl FileLock {
+    #[instrument(level = "trace", err)]
     pub fn new(file: File) -> io::Result<Self> {
         FileExt::lock_shared(&file)?;
 
         Ok(Self { inner: file })
     }
 
-    pub fn from_path<P: Into<PathBuf>>(path: P) -> io::Result<Self> {
+    #[instrument(level = "trace", err)]
+    pub fn from_path<P: Into<PathBuf> + Debug>(path: P) -> io::Result<Self> {
         let path_buf = path.into();
 
         let file = File::open(&path_buf)?;
@@ -60,6 +65,7 @@ pub struct SliceReader {
 }
 
 impl SliceReader {
+    #[instrument(level = "trace", err)]
     pub fn new(file: Arc<FileLock>, offset: u64, length: u64) -> io::Result<Self> {
         Ok(Self {
             file,
@@ -70,6 +76,7 @@ impl SliceReader {
 }
 
 impl Read for SliceReader {
+    #[instrument(level = "trace", skip(self, buf), ret, err)]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.remaining == 0 {
             return Ok(0);
@@ -101,6 +108,7 @@ pub struct ChainReader<R: Read> {
 }
 
 impl<R: Read> ChainReader<R> {
+    #[instrument(level = "trace", skip(inners))]
     pub fn new<I: Into<VecDeque<R>>>(inners: I) -> Self {
         Self {
             inners: inners.into(),
@@ -109,6 +117,7 @@ impl<R: Read> ChainReader<R> {
 }
 
 impl<R: Read> Read for ChainReader<R> {
+    #[instrument(level = "trace", skip(self, buf), ret, err)]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         loop {
             let current_reader = match self.inners.front_mut() {
@@ -153,6 +162,7 @@ pub struct FileRegistry {
 }
 
 impl FileRegistry {
+    #[instrument(level = "trace", skip(paths), err)]
     pub fn new<P: Into<PathBuf>, I: Iterator<Item = P>>(paths: I) -> io::Result<Self> {
         let mut global_offset = 0;
 
@@ -176,6 +186,7 @@ impl FileRegistry {
         Ok(Self { entries })
     }
 
+    #[instrument(level = "trace", skip(self))]
     pub fn resolve_chunk(&self, global_start: u64, length: u32) -> Vec<ChunkSource> {
         let global_end = global_start + length as u64;
         let mut mappings = Vec::new();
@@ -217,6 +228,7 @@ pub struct GlobalStream {
 }
 
 impl GlobalStream {
+    #[instrument(level = "trace", skip(paths))]
     pub fn new<P: Into<PathBuf>, I: Iterator<Item = P>>(paths: I) -> Self {
         let paths = paths.map(|v| v.into()).collect();
 
@@ -228,6 +240,7 @@ impl GlobalStream {
 }
 
 impl Read for GlobalStream {
+    #[instrument(level = "trace", skip(self, buf), ret, err)]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         loop {
             if let Some(ref mut file) = self.current_file {
@@ -252,6 +265,7 @@ impl Read for GlobalStream {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ChunkerConfig {
     pub min_size: u32,
     pub avg_size: u32,
@@ -264,6 +278,7 @@ pub struct Chunker {
 }
 
 impl Chunker {
+    #[instrument(level = "trace", skip(paths), err)]
     pub fn new(paths: Vec<PathBuf>, config: ChunkerConfig) -> io::Result<Self> {
         let registry = Arc::new(FileRegistry::new(paths.iter())?);
 

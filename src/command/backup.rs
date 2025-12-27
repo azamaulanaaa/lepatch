@@ -1,11 +1,13 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
 };
 
 use futures::io::Cursor;
+use tracing::instrument;
 use walkdir::WalkDir;
 
 use crate::{
@@ -13,7 +15,8 @@ use crate::{
     reader, storage,
 };
 
-pub async fn backup<P: AsRef<Path>, S: storage::Storage>(
+#[instrument(skip(storage), ret, err)]
+pub async fn backup<P: AsRef<Path> + Debug, S: storage::Storage>(
     root: P,
     storage: S,
     config: reader::ChunkerConfig,
@@ -30,13 +33,16 @@ pub async fn backup<P: AsRef<Path>, S: storage::Storage>(
     let paths = WalkDir::new(&root)
         .sort_by_file_name()
         .into_iter()
-        .map(|v| v.map(|v| v.into_path()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| io::Error::other(e))?;
+        .filter_map(|v| v.map(|v| v.into_path()).ok())
+        .collect::<Vec<_>>();
 
     let paths = paths
         .into_iter()
         .map(|path| {
+            if path.is_dir() {
+                return Ok(None);
+            }
+
             let meta = fs::symlink_metadata(&path)?;
 
             let relative_path = path
