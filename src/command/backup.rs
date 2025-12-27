@@ -107,14 +107,17 @@ pub async fn backup<P: AsRef<Path> + Debug, S: storage::Storage>(
             let index = snapshot.chunks.len() as u32;
             let len = buffer.len() as u64;
 
-            let location = {
+            let key = {
                 let reader = Box::new(Cursor::new(buffer));
-                let location = storage.put(reader, len).await?;
+                let key = storage.put(reader, len).await?;
 
-                location
+                key
             };
 
-            snapshot.chunks.push(metadata::Chunk { hash, location });
+            snapshot.chunks.push(metadata::Chunk {
+                hash,
+                location: key,
+            });
 
             index
         };
@@ -152,18 +155,18 @@ pub async fn backup<P: AsRef<Path> + Debug, S: storage::Storage>(
         }
     }
 
-    let location = {
+    let key = {
         let mut buffer = Vec::new();
         metadata::BincodeStore.save(&snapshot, &mut buffer)?;
 
         let len = buffer.len() as u64;
         let reader = Box::new(Cursor::new(buffer));
-        let location = storage.put(reader, len).await?;
+        let key = storage.put(reader, len).await?;
 
-        location
+        key
     };
 
-    Ok(location)
+    Ok(key)
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]

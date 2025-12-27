@@ -67,9 +67,9 @@ async fn main() -> io::Result<()> {
             };
             let storage = storage::BlobFileStorage::new(output, overwrite).await?;
 
-            let location = backup(source, storage, config).await?;
+            let key = backup(source, storage, config).await?;
 
-            index_file.write_all(location.as_bytes())?;
+            index_file.write_all(key.as_bytes())?;
             index_file.flush()?;
         }
     }
