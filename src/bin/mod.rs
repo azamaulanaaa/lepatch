@@ -44,20 +44,13 @@ async fn main() -> io::Result<()> {
             output,
             overwrite,
         } => {
-            let mut index_file = {
-                let mut path = output.clone();
-                path.add_extension("idx");
-
-                let file = if overwrite {
-                    fs::File::create(&path)?
-                } else {
-                    fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(&path)?
-                };
-
-                file
+            let mut index_file = if overwrite {
+                fs::File::create(&output)?
+            } else {
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&output)?
             };
 
             let config = ChunkerConfig {
@@ -65,7 +58,9 @@ async fn main() -> io::Result<()> {
                 avg_size: 16 * 1024,
                 max_size: 64 * 1024,
             };
-            let storage = storage::BlobFileStorage::new(output, overwrite).await?;
+
+            let storage_path = output.clone().with_added_extension("bin");
+            let storage = storage::BlobFileStorage::new(storage_path, overwrite).await?;
 
             let key = backup(source, storage, config).await?;
 
