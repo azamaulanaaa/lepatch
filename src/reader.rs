@@ -230,6 +230,7 @@ pub struct ChunkerConfig {
 pub struct Chunker {
     registry: Arc<FileRegistry>,
     cdc_iter: StreamCDC<GlobalStream>,
+    last_file: Option<(PathBuf, Arc<File>)>,
 }
 
 impl Chunker {
@@ -243,6 +244,7 @@ impl Chunker {
         Ok(Self {
             registry,
             cdc_iter: cdc,
+            last_file: None,
         })
     }
 }
@@ -263,13 +265,34 @@ impl Iterator for Chunker {
 
         let mut slices = VecDeque::new();
 
-        for map in &sources {
-            let file = match File::open(&map.path) {
-                Ok(l) => Arc::new(l),
-                Err(e) => return Some(Err(e)),
+        for source in &sources {
+            let file = {
+                let file = match &self.last_file {
+                    Some((last_path, last_file)) => {
+                        if *last_path == source.path {
+                            Some(last_file.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    None => None,
+                };
+
+                match file {
+                    Some(file) => file,
+                    None => {
+                        let file = match File::open(&source.path) {
+                            Ok(v) => Arc::new(v),
+                            Err(e) => return Some(Err(e)),
+                        };
+                        self.last_file = Some((source.path.clone(), file.clone()));
+
+                        file
+                    }
+                }
             };
 
-            match SliceReader::new(file, map.offset, map.length as u64) {
+            match SliceReader::new(file, source.offset, source.length as u64) {
                 Ok(slice) => slices.push_back(slice),
                 Err(e) => return Some(Err(e)),
             }
