@@ -11,8 +11,6 @@ mod bincode;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
-    pub name: String,
-    pub version: u8,
     pub files: Vec<File>,
     pub chunks: Vec<Chunk>,
     pub file_chunks: Vec<FileChunk>,
