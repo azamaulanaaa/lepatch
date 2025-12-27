@@ -15,7 +15,6 @@ use fs2::FileExt;
 
 pub struct FileLock {
     inner: File,
-    pub path: PathBuf,
 }
 
 impl FileLock {
@@ -26,10 +25,7 @@ impl FileLock {
 
         FileExt::lock_shared(&file)?;
 
-        Ok(Self {
-            inner: file,
-            path: path_buf,
-        })
+        Ok(Self { inner: file })
     }
 }
 
