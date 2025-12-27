@@ -18,14 +18,18 @@ pub struct FileLock {
 }
 
 impl FileLock {
-    pub fn new<P: Into<PathBuf>>(path: P) -> io::Result<Self> {
+    pub fn new(file: File) -> io::Result<Self> {
+        FileExt::lock_shared(&file)?;
+
+        Ok(Self { inner: file })
+    }
+
+    pub fn from_path<P: Into<PathBuf>>(path: P) -> io::Result<Self> {
         let path_buf = path.into();
 
         let file = File::open(&path_buf)?;
 
-        FileExt::lock_shared(&file)?;
-
-        Ok(Self { inner: file })
+        Self::new(file)
     }
 }
 
@@ -239,7 +243,7 @@ impl Read for GlobalStream {
 
             match self.paths.pop_front() {
                 Some(path) => {
-                    let lock = FileLock::new(path)?;
+                    let lock = FileLock::from_path(path)?;
                     self.current_file = Some(lock);
                 }
                 None => return Ok(0),
@@ -290,7 +294,7 @@ impl Iterator for Chunker {
         let mut slices = VecDeque::new();
 
         for map in &sources {
-            let lock = match FileLock::new(&map.path) {
+            let lock = match FileLock::from_path(&map.path) {
                 Ok(l) => Arc::new(l),
                 Err(e) => return Some(Err(e)),
             };
