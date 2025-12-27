@@ -2,11 +2,10 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     fs,
-    io::{self, Read},
+    io::{self, Cursor, Read},
     path::{Path, PathBuf},
 };
 
-use futures::io::Cursor;
 use tracing::instrument;
 use walkdir::WalkDir;
 

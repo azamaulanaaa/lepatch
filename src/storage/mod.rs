@@ -1,7 +1,7 @@
 use std::io;
 
 use async_trait::async_trait;
-use futures::AsyncRead;
+use tokio::io::AsyncRead;
 
 pub use blob::BlobFileStorage;
 

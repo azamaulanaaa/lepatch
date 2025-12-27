@@ -11,7 +11,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
     sync::RwLock,
 };
-use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use tracing::instrument;
 
 use super::{Storage, StreamReader};
@@ -72,11 +71,11 @@ impl Storage for BlobFileStorage {
         file.seek(SeekFrom::Start(entry.offset)).await?;
         let limited_reader = file.take(entry.length);
 
-        Ok(Box::new(limited_reader.compat()))
+        Ok(Box::new(limited_reader))
     }
 
     #[instrument(skip(reader), ret, err)]
-    async fn put(&self, reader: StreamReader, _len: u64) -> io::Result<String> {
+    async fn put(&self, mut reader: StreamReader, _len: u64) -> io::Result<String> {
         let _guard = self.lock.write().await;
 
         let mut file = fs::OpenOptions::new()
@@ -87,8 +86,7 @@ impl Storage for BlobFileStorage {
 
         let offset = file.metadata().await?.len();
 
-        let mut compat_reader = reader.compat();
-        let length = tokio::io::copy(&mut compat_reader, &mut file).await?;
+        let length = tokio::io::copy(&mut reader, &mut file).await?;
 
         let entry = BlobEntry { offset, length };
         let key = serde_json::to_string(&entry).map_err(|e| io::Error::other(e))?;
