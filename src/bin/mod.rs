@@ -6,11 +6,14 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use lepatch::{command::backup::backup, reader::ChunkerConfig, storage};
+use tracing::level_filters::LevelFilter;
 
 #[derive(Debug, Clone, Parser)]
 struct Args {
     #[command(subcommand)]
     command: Commands,
+    #[arg(long, default_value_t = false)]
+    verbose: bool,
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -26,6 +29,14 @@ enum Commands {
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let args = Args::parse();
+
+    let log_level = if args.verbose {
+        LevelFilter::TRACE
+    } else {
+        LevelFilter::INFO
+    };
+
+    tracing_subscriber::fmt().with_max_level(log_level).init();
 
     match args.command {
         Commands::Backup {
