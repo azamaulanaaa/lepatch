@@ -1,0 +1,88 @@
+use std::io::{self, SeekFrom};
+use std::path::PathBuf;
+
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use tokio::fs::{self, OpenOptions};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::sync::RwLock;
+use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
+
+use super::{Storage, StreamReader};
+
+#[derive(Serialize, Deserialize, Debug)]
+struct BlobEntry {
+    offset: u64,
+    length: u64,
+}
+
+pub struct BlobFileStorage {
+    file_path: PathBuf,
+    lock: RwLock<()>,
+}
+
+impl BlobFileStorage {
+    pub async fn new<P: Into<PathBuf>>(path: P, allow_overwrite: bool) -> io::Result<Self> {
+        let file_path = path.into();
+
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        if allow_overwrite {
+            fs::File::create(&file_path).await?;
+        } else {
+            OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .await?;
+        }
+
+        Ok(Self {
+            file_path,
+            lock: RwLock::new(()),
+        })
+    }
+}
+
+#[async_trait]
+impl Storage for BlobFileStorage {
+    async fn get(&self, key: &str) -> io::Result<StreamReader> {
+        let entry: BlobEntry = serde_json::from_str(key).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Invalid blob key: {}", e),
+            )
+        })?;
+
+        let _guard = self.lock.read().await;
+
+        let mut file = fs::File::open(&self.file_path).await?;
+
+        file.seek(SeekFrom::Start(entry.offset)).await?;
+        let limited_reader = file.take(entry.length);
+
+        Ok(Box::new(limited_reader.compat()))
+    }
+
+    async fn put(&self, reader: StreamReader, _len: u64) -> io::Result<String> {
+        let _guard = self.lock.write().await;
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.file_path)
+            .await?;
+
+        let offset = file.metadata().await?.len();
+
+        let mut compat_reader = reader.compat();
+        let length = tokio::io::copy(&mut compat_reader, &mut file).await?;
+
+        let entry = BlobEntry { offset, length };
+        let key = serde_json::to_string(&entry).map_err(|e| io::Error::other(e))?;
+
+        Ok(key)
+    }
+}

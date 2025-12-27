@@ -3,7 +3,11 @@ use std::io;
 use async_trait::async_trait;
 use futures::AsyncRead;
 
+pub use blob::BlobFileStorage;
+
 pub type StreamReader = Box<dyn AsyncRead + Unpin + Send>;
+
+mod blob;
 
 #[async_trait]
 pub trait Storage: Send + Sync {
