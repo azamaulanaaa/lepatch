@@ -1,13 +1,6 @@
-use std::{
-    io::{self, Read, Write},
-    path::PathBuf,
-};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-
-pub use bincode::BincodeStore;
-
-mod bincode;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -42,9 +35,4 @@ pub struct FileChunk {
     pub chunk_offset: u32,
     pub file_offset: u64,
     pub length: u32,
-}
-
-pub trait MetadataStore {
-    fn open<R: Read>(&self, reader: R) -> io::Result<Snapshot>;
-    fn save<W: Write>(&self, snapshot: &Snapshot, writer: W) -> io::Result<()>;
 }

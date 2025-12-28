@@ -9,10 +9,7 @@ use std::{
 use tracing::instrument;
 use walkdir::WalkDir;
 
-use crate::{
-    metadata::{self, MetadataStore},
-    reader, storage,
-};
+use crate::{metadata, reader, storage};
 
 #[instrument(skip(storage), ret, err)]
 pub async fn backup<P: AsRef<Path> + Debug, S: storage::Storage>(
@@ -156,8 +153,7 @@ pub async fn backup<P: AsRef<Path> + Debug, S: storage::Storage>(
     }
 
     let key = {
-        let mut buffer = Vec::new();
-        metadata::BincodeStore.save(&snapshot, &mut buffer)?;
+        let buffer = bincode::serialize(&snapshot).map_err(|e| io::Error::other(e))?;
 
         let len = buffer.len() as u64;
         let reader = Box::new(Cursor::new(buffer));
