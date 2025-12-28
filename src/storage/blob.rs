@@ -13,7 +13,7 @@ use tokio::{
 };
 use tracing::instrument;
 
-use super::{Storage, StreamReader};
+use crate::{reader, storage};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct BlobEntry {
@@ -54,9 +54,9 @@ impl BlobFileStorage {
 }
 
 #[async_trait]
-impl Storage for BlobFileStorage {
+impl storage::Storage for BlobFileStorage {
     #[instrument(err)]
-    async fn get(&self, key: &str) -> io::Result<StreamReader> {
+    async fn get(&self, key: &str) -> io::Result<reader::StreamReader> {
         let entry: BlobEntry = serde_json::from_str(key).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -75,7 +75,7 @@ impl Storage for BlobFileStorage {
     }
 
     #[instrument(skip(reader), ret, err)]
-    async fn put(&self, mut reader: StreamReader, _len: u64) -> io::Result<String> {
+    async fn put(&self, mut reader: reader::StreamReader, _len: u64) -> io::Result<String> {
         let _guard = self.lock.write().await;
 
         let mut file = fs::OpenOptions::new()

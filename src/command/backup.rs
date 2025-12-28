@@ -2,10 +2,11 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     fs,
-    io::{self, Cursor, Read},
+    io::{self, Cursor},
     path::{Path, PathBuf},
 };
 
+use tokio::io::AsyncReadExt;
 use tracing::instrument;
 use walkdir::WalkDir;
 
@@ -92,7 +93,7 @@ pub async fn backup<P: AsRef<Path> + Debug, S: storage::Storage>(
 
         let buffer = {
             let mut buffer = Vec::new();
-            let n = chunk.reader.read_to_end(&mut buffer)?;
+            let n = chunk.reader.read_to_end(&mut buffer).await?;
             buffer.truncate(n);
 
             buffer

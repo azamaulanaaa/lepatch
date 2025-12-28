@@ -1,98 +1,17 @@
-#[cfg(windows)]
-use std::os::windows::fs::FileExt as WinFileExt;
-
 use std::{
     collections::VecDeque,
     fmt::Debug,
     fs::File,
-    io::{self, Read},
+    io::{self, Cursor, Read},
     path::PathBuf,
     sync::Arc,
 };
 
 use fastcdc::v2020::StreamCDC;
+use tokio::io::AsyncRead;
 use tracing::instrument;
 
-pub struct SliceReader {
-    file: Arc<File>,
-    offset: u64,
-    remaining: u64,
-}
-
-impl SliceReader {
-    #[instrument(level = "trace", err)]
-    pub fn new(file: Arc<File>, offset: u64, length: u64) -> io::Result<Self> {
-        Ok(Self {
-            file,
-            offset,
-            remaining: length,
-        })
-    }
-}
-
-impl Read for SliceReader {
-    #[instrument(level = "trace", skip(self, buf), ret, err)]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.remaining == 0 {
-            return Ok(0);
-        }
-
-        let max_len = self.remaining.min(buf.len() as u64) as usize;
-        let read_buf = &mut buf[..max_len];
-
-        #[cfg(unix)]
-        let n = self.file.read_at(read_buf, self.offset)?;
-
-        #[cfg(windows)]
-        let n = self.file.seek_read(read_buf, self.offset)?;
-
-        if n == 0 {
-            self.remaining = 0;
-            return Ok(0);
-        }
-
-        self.offset += n as u64;
-        self.remaining -= n as u64;
-
-        Ok(n)
-    }
-}
-
-pub struct ChainReader<R: Read> {
-    inners: VecDeque<R>,
-}
-
-impl<R: Read> ChainReader<R> {
-    #[instrument(level = "trace", skip(inners))]
-    pub fn new<I: Into<VecDeque<R>>>(inners: I) -> Self {
-        Self {
-            inners: inners.into(),
-        }
-    }
-}
-
-impl<R: Read> Read for ChainReader<R> {
-    #[instrument(level = "trace", skip(self, buf), ret, err)]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        loop {
-            let current_reader = match self.inners.front_mut() {
-                Some(slice) => slice,
-                None => return Ok(0),
-            };
-
-            match current_reader.read(buf) {
-                Ok(0) => {
-                    self.inners.pop_front();
-                    continue;
-                }
-                Ok(n) => {
-                    return Ok(n);
-                }
-                Err(e) => return Err(e),
-            }
-        }
-    }
-}
+pub type StreamReader = Box<dyn AsyncRead + Unpin + Send>;
 
 #[derive(Debug, Clone)]
 pub struct ChunkSource {
@@ -103,7 +22,7 @@ pub struct ChunkSource {
 
 pub struct Chunk {
     pub sources: Vec<ChunkSource>,
-    pub reader: ChainReader<SliceReader>,
+    pub reader: StreamReader,
 }
 
 struct EntryFileRegistry {
@@ -230,7 +149,6 @@ pub struct ChunkerConfig {
 pub struct Chunker {
     registry: Arc<FileRegistry>,
     cdc_iter: StreamCDC<GlobalStream>,
-    last_file: Option<(PathBuf, Arc<File>)>,
 }
 
 impl Chunker {
@@ -244,7 +162,6 @@ impl Chunker {
         Ok(Self {
             registry,
             cdc_iter: cdc,
-            last_file: None,
         })
     }
 }
@@ -263,44 +180,9 @@ impl Iterator for Chunker {
             .registry
             .resolve_chunk(cdc_chunk.offset as u64, cdc_chunk.length as u32);
 
-        let mut slices = VecDeque::new();
+        let reader = Cursor::new(cdc_chunk.data);
+        let reader = Box::new(reader);
 
-        for source in &sources {
-            let file = {
-                let file = match &self.last_file {
-                    Some((last_path, last_file)) => {
-                        if *last_path == source.path {
-                            Some(last_file.clone())
-                        } else {
-                            None
-                        }
-                    }
-                    None => None,
-                };
-
-                match file {
-                    Some(file) => file,
-                    None => {
-                        let file = match File::open(&source.path) {
-                            Ok(v) => Arc::new(v),
-                            Err(e) => return Some(Err(e)),
-                        };
-                        self.last_file = Some((source.path.clone(), file.clone()));
-
-                        file
-                    }
-                }
-            };
-
-            match SliceReader::new(file, source.offset, source.length as u64) {
-                Ok(slice) => slices.push_back(slice),
-                Err(e) => return Some(Err(e)),
-            }
-        }
-
-        Some(Ok(Chunk {
-            sources,
-            reader: ChainReader::new(slices),
-        }))
+        Some(Ok(Chunk { sources, reader }))
     }
 }
