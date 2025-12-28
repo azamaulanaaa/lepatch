@@ -4,11 +4,13 @@ use std::{
     fs::File,
     io::{self, Cursor, Read},
     path::PathBuf,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
 };
 
 use fastcdc::v2020::StreamCDC;
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, ReadBuf};
 use tracing::instrument;
 
 pub type StreamReader = Box<dyn AsyncRead + Unpin + Send>;
@@ -184,5 +186,68 @@ impl Iterator for Chunker {
         let reader = Box::new(reader);
 
         Some(Ok(Chunk { sources, reader }))
+    }
+}
+
+pub struct SliceAsyncReader<R>
+where
+    R: AsyncRead + Unpin,
+{
+    inner: R,
+    position: u64,
+    limit: u64,
+}
+
+impl<R> SliceAsyncReader<R>
+where
+    R: AsyncRead + Unpin,
+{
+    pub fn new(reader: R, limit: u64) -> Self {
+        Self {
+            inner: reader,
+            position: 0,
+            limit,
+        }
+    }
+}
+
+impl<R> AsyncRead for SliceAsyncReader<R>
+where
+    R: AsyncRead + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let remaining = self.limit.saturating_sub(self.position);
+
+        if remaining == 0 {
+            return Poll::Ready(Ok(()));
+        }
+
+        let mut stack_buf = [0u8; 4096];
+
+        let limit = std::cmp::min(remaining, buf.remaining() as u64) as usize;
+        let limit = std::cmp::min(limit, stack_buf.len());
+
+        let mut temp_buf = ReadBuf::new(&mut stack_buf[..limit]);
+
+        let result = Pin::new(&mut self.inner).poll_read(cx, &mut temp_buf);
+
+        match result {
+            Poll::Ready(Ok(())) => {
+                let filled = temp_buf.filled();
+                let n = filled.len();
+
+                if n > 0 {
+                    buf.put_slice(filled);
+                    self.position += n as u64;
+                }
+
+                Poll::Ready(Ok(()))
+            }
+            other => other,
+        }
     }
 }
