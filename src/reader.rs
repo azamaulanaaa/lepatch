@@ -285,8 +285,7 @@ where
 
         match result {
             Poll::Ready(Ok(_n)) => Poll::Ready(Ok(self.position)),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-            Poll::Pending => Poll::Pending,
+            other => other,
         }
     }
 }
