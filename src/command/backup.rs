@@ -13,7 +13,7 @@ use walkdir::WalkDir;
 use crate::{metadata, reader, storage};
 
 #[instrument(skip(storage), ret, err)]
-pub async fn backup<P: AsRef<Path> + Debug, S: storage::Storage>(
+pub async fn backup<P: AsRef<Path> + Debug, S: storage::StoragePut>(
     root: P,
     storage: S,
     config: reader::ChunkerConfig,

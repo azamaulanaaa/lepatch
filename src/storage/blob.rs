@@ -21,12 +21,12 @@ struct BlobEntry {
 }
 
 #[derive(Debug)]
-pub struct BlobFileStorage {
+pub struct BlobFileStorage<const WRITE: bool> {
     file_path: PathBuf,
     lock: RwLock<()>,
 }
 
-impl BlobFileStorage {
+impl<const WRITE: bool> BlobFileStorage<WRITE> {
     #[instrument(err)]
     pub async fn new<P: Into<PathBuf> + Debug>(path: P, allow_overwrite: bool) -> io::Result<Self> {
         let file_path = path.into();
@@ -35,14 +35,16 @@ impl BlobFileStorage {
             fs::create_dir_all(parent).await?;
         }
 
-        if allow_overwrite {
-            fs::File::create(&file_path).await?;
-        } else {
-            fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(&file_path)
-                .await?;
+        if WRITE {
+            if allow_overwrite {
+                fs::File::create(&file_path).await?;
+            } else {
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(&file_path)
+                    .await?;
+            }
         }
 
         Ok(Self {
@@ -53,7 +55,7 @@ impl BlobFileStorage {
 }
 
 #[async_trait]
-impl storage::Storage for BlobFileStorage {
+impl<const WRITE: bool> storage::StorageGet for BlobFileStorage<WRITE> {
     #[instrument(err)]
     async fn get(&self, key: &str) -> io::Result<reader::StreamReadSeeker> {
         let entry: BlobEntry = serde_json::from_str(key).map_err(|e| {
@@ -72,7 +74,10 @@ impl storage::Storage for BlobFileStorage {
 
         Ok(Box::new(limited_reader))
     }
+}
 
+#[async_trait]
+impl storage::StoragePut for BlobFileStorage<true> {
     #[instrument(skip(reader), ret, err)]
     async fn put(&self, mut reader: reader::StreamReadSeeker, _len: u64) -> io::Result<String> {
         let _guard = self.lock.write().await;
