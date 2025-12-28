@@ -20,7 +20,7 @@ struct Args {
 enum Commands {
     Backup {
         source: PathBuf,
-        output: PathBuf,
+        name: String,
         #[arg(long, default_value_t = false)]
         overwrite: bool,
     },
@@ -41,16 +41,18 @@ async fn main() -> io::Result<()> {
     match args.command {
         Commands::Backup {
             source,
-            output,
+            name,
             overwrite,
         } => {
+            let index_path = PathBuf::from(&name).with_extension("idx");
+
             let mut index_file = if overwrite {
-                fs::File::create(&output)?
+                fs::File::create(index_path)?
             } else {
                 fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
-                    .open(&output)?
+                    .open(index_path)?
             };
 
             let config = ChunkerConfig {
@@ -59,7 +61,7 @@ async fn main() -> io::Result<()> {
                 max_size: 64 * 1024,
             };
 
-            let storage_path = output.clone().with_added_extension("bin");
+            let storage_path = PathBuf::from(&name).with_extension("bin");
             let storage = storage::BlobFileStorage::new(storage_path, overwrite).await?;
 
             let key = backup(source, storage, config).await?;
