@@ -10,10 +10,14 @@ use std::{
 };
 
 use fastcdc::v2020::StreamCDC;
-use tokio::io::{AsyncRead, ReadBuf};
+use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
 use tracing::instrument;
 
-pub type StreamReader = Box<dyn AsyncRead + Unpin + Send>;
+pub trait AsyncReadSeek: AsyncRead + AsyncSeek {}
+
+impl<T: AsyncRead + AsyncSeek + ?Sized> AsyncReadSeek for T {}
+
+pub type StreamReadSeeker = Box<dyn AsyncReadSeek + Unpin + Send>;
 
 #[derive(Debug, Clone)]
 pub struct ChunkSource {
@@ -24,7 +28,7 @@ pub struct ChunkSource {
 
 pub struct Chunk {
     pub sources: Vec<ChunkSource>,
-    pub reader: StreamReader,
+    pub reader: StreamReadSeeker,
 }
 
 struct EntryFileRegistry {
@@ -189,19 +193,13 @@ impl Iterator for Chunker {
     }
 }
 
-pub struct SliceAsyncReader<R>
-where
-    R: AsyncRead + Unpin,
-{
+pub struct SliceAsyncReader<R> {
     inner: R,
     position: u64,
     limit: u64,
 }
 
-impl<R> SliceAsyncReader<R>
-where
-    R: AsyncRead + Unpin,
-{
+impl<R> SliceAsyncReader<R> {
     pub fn new(reader: R, limit: u64) -> Self {
         Self {
             inner: reader,
@@ -248,6 +246,47 @@ where
                 Poll::Ready(Ok(()))
             }
             other => other,
+        }
+    }
+}
+
+impl<R> AsyncSeek for SliceAsyncReader<R>
+where
+    R: AsyncSeek + Unpin,
+{
+    fn start_seek(mut self: Pin<&mut Self>, position: io::SeekFrom) -> io::Result<()> {
+        let new_position = match position {
+            io::SeekFrom::Start(n) => n,
+            io::SeekFrom::Current(n) => self
+                .position
+                .checked_add_signed(n)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "seek before start"))?,
+            io::SeekFrom::End(n) => self
+                .limit
+                .checked_add_signed(n)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "seek before start"))?,
+        };
+
+        if new_position > self.limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "seek outside limit",
+            ));
+        }
+
+        let delta = (new_position as i128 - self.position as i128) as i64;
+        self.position = new_position;
+
+        Pin::new(&mut self.inner).start_seek(io::SeekFrom::Current(delta as i64))
+    }
+
+    fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        let result = Pin::new(&mut self.inner).poll_complete(cx);
+
+        match result {
+            Poll::Ready(Ok(_n)) => Poll::Ready(Ok(self.position)),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
         }
     }
 }

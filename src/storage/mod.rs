@@ -9,7 +9,7 @@ mod blob;
 
 #[async_trait]
 pub trait Storage: Send + Sync {
-    async fn get(&self, key: &str) -> io::Result<reader::StreamReader>;
+    async fn get(&self, key: &str) -> io::Result<reader::StreamReadSeeker>;
 
-    async fn put(&self, reader: reader::StreamReader, len: u64) -> io::Result<String>;
+    async fn put(&self, reader: reader::StreamReadSeeker, len: u64) -> io::Result<String>;
 }

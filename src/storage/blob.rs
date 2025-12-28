@@ -6,14 +6,13 @@ use std::{
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    fs,
-    io::{AsyncReadExt, AsyncSeekExt},
-    sync::RwLock,
-};
+use tokio::{fs, io::AsyncSeekExt, sync::RwLock};
 use tracing::instrument;
 
-use crate::{reader, storage};
+use crate::{
+    reader::{self, SliceAsyncReader},
+    storage,
+};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct BlobEntry {
@@ -56,7 +55,7 @@ impl BlobFileStorage {
 #[async_trait]
 impl storage::Storage for BlobFileStorage {
     #[instrument(err)]
-    async fn get(&self, key: &str) -> io::Result<reader::StreamReader> {
+    async fn get(&self, key: &str) -> io::Result<reader::StreamReadSeeker> {
         let entry: BlobEntry = serde_json::from_str(key).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -69,13 +68,13 @@ impl storage::Storage for BlobFileStorage {
         let mut file = fs::File::open(&self.file_path).await?;
 
         file.seek(SeekFrom::Start(entry.offset)).await?;
-        let limited_reader = file.take(entry.length);
+        let limited_reader = SliceAsyncReader::new(file, entry.length);
 
         Ok(Box::new(limited_reader))
     }
 
     #[instrument(skip(reader), ret, err)]
-    async fn put(&self, mut reader: reader::StreamReader, _len: u64) -> io::Result<String> {
+    async fn put(&self, mut reader: reader::StreamReadSeeker, _len: u64) -> io::Result<String> {
         let _guard = self.lock.write().await;
 
         let mut file = fs::OpenOptions::new()
