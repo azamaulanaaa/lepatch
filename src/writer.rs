@@ -4,6 +4,7 @@ use std::{
 };
 
 use tokio::io::AsyncWrite;
+use tracing::instrument;
 
 pub struct SliceAsyncWriter<W>
 where
@@ -17,6 +18,7 @@ impl<W> SliceAsyncWriter<W>
 where
     W: AsyncWrite + Unpin,
 {
+    #[instrument(level = "trace", skip(writer))]
     pub fn new(writer: W, limit: u64) -> Self {
         Self {
             inner: writer,
@@ -29,6 +31,7 @@ impl<W> AsyncWrite for SliceAsyncWriter<W>
 where
     W: AsyncWrite + Unpin,
 {
+    #[instrument(level = "trace", skip(self, cx, buf), ret)]
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -49,6 +52,7 @@ where
         result
     }
 
+    #[instrument(level = "trace", skip(self, cx), ret)]
     fn poll_flush(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -56,6 +60,7 @@ where
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
+    #[instrument(level = "trace", skip(self, cx), ret)]
     fn poll_shutdown(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,

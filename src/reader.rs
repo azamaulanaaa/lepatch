@@ -200,6 +200,7 @@ pub struct SliceAsyncReader<R> {
 }
 
 impl<R> SliceAsyncReader<R> {
+    #[instrument(level = "trace", skip(reader))]
     pub fn new(reader: R, limit: u64) -> Self {
         Self {
             inner: reader,
@@ -213,6 +214,7 @@ impl<R> AsyncRead for SliceAsyncReader<R>
 where
     R: AsyncRead + Unpin,
 {
+    #[instrument(level = "trace", skip(self, cx), ret)]
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -254,6 +256,7 @@ impl<R> AsyncSeek for SliceAsyncReader<R>
 where
     R: AsyncSeek + Unpin,
 {
+    #[instrument(level = "trace", skip(self), err)]
     fn start_seek(mut self: Pin<&mut Self>, position: io::SeekFrom) -> io::Result<()> {
         let new_position = match position {
             io::SeekFrom::Start(n) => n,
@@ -280,6 +283,7 @@ where
         Pin::new(&mut self.inner).start_seek(io::SeekFrom::Current(delta as i64))
     }
 
+    #[instrument(level = "trace", skip(self, cx), ret)]
     fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
         let result = Pin::new(&mut self.inner).poll_complete(cx);
 
