@@ -22,16 +22,8 @@ struct Args {
 
 #[derive(Debug, Clone, Subcommand)]
 enum Commands {
-    Backup {
-        source: PathBuf,
-        name: String,
-        #[arg(long, default_value_t = false)]
-        overwrite: bool,
-    },
-    Restore {
-        destination: PathBuf,
-        name: String,
-    },
+    Backup { source: PathBuf, name: String },
+    Restore { destination: PathBuf, name: String },
 }
 
 #[tokio::main]
@@ -47,16 +39,10 @@ async fn main() -> io::Result<()> {
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
     match args.command {
-        Commands::Backup {
-            source,
-            name,
-            overwrite,
-        } => {
+        Commands::Backup { source, name } => {
             let index_path = PathBuf::from(&name).with_extension("idx");
 
-            let mut index_file = if overwrite {
-                fs::File::create(index_path)?
-            } else {
+            let mut index_file = {
                 fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
@@ -70,7 +56,7 @@ async fn main() -> io::Result<()> {
             };
 
             let storage_path = PathBuf::from(&name).with_extension("bin");
-            let storage = storage::BlobFileStorage::new(storage_path, overwrite).await?;
+            let storage = storage::BlobFileStorage::new(storage_path).await?;
 
             let key = backup(source, storage, config).await?;
 
@@ -85,7 +71,7 @@ async fn main() -> io::Result<()> {
             index_file.read_to_string(&mut key)?;
 
             let storage_path = PathBuf::from(&name).with_extension("bin");
-            let storage = storage::BlobFileStorage::<false>::new(storage_path, false).await?;
+            let storage = storage::BlobFileStorage::<false>::new(storage_path).await?;
 
             restore(destination, key, storage).await?;
         }

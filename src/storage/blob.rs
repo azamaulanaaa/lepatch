@@ -28,7 +28,7 @@ pub struct BlobFileStorage<const WRITE: bool> {
 
 impl<const WRITE: bool> BlobFileStorage<WRITE> {
     #[instrument(err)]
-    pub async fn new<P: Into<PathBuf> + Debug>(path: P, allow_overwrite: bool) -> io::Result<Self> {
+    pub async fn new<P: Into<PathBuf> + Debug>(path: P) -> io::Result<Self> {
         let file_path = path.into();
 
         if let Some(parent) = file_path.parent() {
@@ -36,15 +36,11 @@ impl<const WRITE: bool> BlobFileStorage<WRITE> {
         }
 
         if WRITE {
-            if allow_overwrite {
-                fs::File::create(&file_path).await?;
-            } else {
-                fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .open(&file_path)
-                    .await?;
-            }
+            fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .await?;
         }
 
         Ok(Self {
