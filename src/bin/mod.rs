@@ -58,7 +58,7 @@ async fn main() -> io::Result<()> {
             let storage_path = PathBuf::from(&name).with_extension("bin");
             let storage = storage::BlobFileStorage::new(storage_path).await?;
 
-            let key = backup(source, storage, config).await?;
+            let key = backup(source, None, storage, config).await?;
 
             index_file.write_all(key.as_bytes())?;
             index_file.flush()?;

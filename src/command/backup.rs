@@ -12,12 +12,37 @@ use walkdir::WalkDir;
 
 use crate::{metadata, reader, storage};
 
+enum ChunkStatus {
+    Available(metadata::Chunk),
+    Reuse(u32),
+}
+
 #[instrument(skip(storage), ret, err)]
-pub async fn backup<P: AsRef<Path> + Debug, S: storage::StoragePut>(
+pub async fn backup<P: AsRef<Path> + Debug, S: storage::StoragePut + storage::StorageGet>(
     root: P,
+    base_key: Option<String>,
     storage: S,
     config: reader::ChunkerConfig,
 ) -> io::Result<String> {
+    let mut dedup_cache = match base_key {
+        Some(v) => {
+            let mut reader = storage.get(&v).await?;
+            let mut buffer = Vec::new();
+            reader.read_to_end(&mut buffer).await?;
+            let snapshot: metadata::Snapshot = bincode::deserialize(buffer.as_slice())
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+            let map: HashMap<[u8; 32], ChunkStatus> = snapshot
+                .chunks
+                .into_iter()
+                .map(|v| (v.hash, ChunkStatus::Available(v)))
+                .collect();
+
+            Some(map)
+        }
+        None => None,
+    };
+
     let mut snapshot = metadata::Snapshot {
         files: Vec::new(),
         chunks: Vec::new(),
@@ -102,22 +127,42 @@ pub async fn backup<P: AsRef<Path> + Debug, S: storage::StoragePut>(
         let hash = *blake3::hash(&buffer).as_bytes();
 
         let chunk_index = {
-            let index = snapshot.chunks.len() as u32;
-            let len = buffer.len() as u64;
+            let ref_index = match dedup_cache.as_mut() {
+                Some(map) => match map.get(&hash) {
+                    Some(ChunkStatus::Available(chunk)) => {
+                        let index = snapshot.chunks.len() as u32;
+                        snapshot.chunks.push(chunk.clone());
+                        let _ = map.insert(hash, ChunkStatus::Reuse(index));
 
-            let key = {
-                let reader = Box::new(Cursor::new(buffer));
-                let key = storage.put(reader, len).await?;
-
-                key
+                        Some(index)
+                    }
+                    Some(ChunkStatus::Reuse(index)) => Some(*index),
+                    None => None,
+                },
+                None => None,
             };
 
-            snapshot.chunks.push(metadata::Chunk {
-                hash,
-                location: key,
-            });
+            match ref_index {
+                Some(index) => index,
+                None => {
+                    let index = snapshot.chunks.len() as u32;
+                    let len = buffer.len() as u64;
 
-            index
+                    let key = {
+                        let reader = Box::new(Cursor::new(buffer));
+                        let key = storage.put(reader, len).await?;
+
+                        key
+                    };
+
+                    snapshot.chunks.push(metadata::Chunk {
+                        hash,
+                        location: key,
+                    });
+
+                    index
+                }
+            }
         };
 
         let mut chunk_offset = 0;
