@@ -6,7 +6,7 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use lepatch::{
-    command::{backup::backup, restore::restore},
+    command::{backup, restore},
     reader::ChunkerConfig,
     storage,
 };
